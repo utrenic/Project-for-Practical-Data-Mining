@@ -1,0 +1,172 @@
+---
+title: "Coursera - Practical Machine Learning Project"
+author: "Kelvin Leung"
+date: "7/10/2018"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+### Load libraries
+
+
+```{r caret_lib}
+library(caret)
+```
+```{r rattle_lib}
+library(rattle)
+```
+
+```{r rpart_lib}
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(cvTools)
+```
+
+```{r rf_lib}
+library(randomForest)
+```
+
+## Data loading
+```{r training}
+train_data <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"), header=TRUE, na.strings = c("NA","#DIV/0!",""))
+dim(train_data)
+```
+
+```{r testing}
+test_data <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"), header=TRUE, na.strings = c("NA","#DIV/0!",""))
+dim(test_data)
+```
+
+The training set has 19622 observations and each observation has 160 columns.
+We notice that many columns have N/A values or blank values. So we will remove them because they will not produce any information. Also, the first seven columns give information about the people who did the test and the timestamps. We will remove these columns in our model. Note, the "classe" variable is in the last column of our training set. 
+
+The testing set has 20 cases. It will be used to test the accuracy of our models. 
+
+## Cleansing procedure
+Here is the R code to remove the columns that has N/A or "" values.
+
+```{r train_data_cleaning}
+# removing columns having value of "N/A" or "" value that have at least 90% of the total number of rows in training set
+tidx_2remove <- which(colSums(is.na(train_data) | train_data=='') > 0.9* dim(train_data)[1])
+# removing those columns
+train_clean <- train_data[ ,-tidx_2remove]
+# removing the first 7 columns that are irrelevant to the prediction model
+train_clean <- train_clean[ ,-(1:7)]
+dim(train_clean)
+str(train_clean)
+```
+
+```{r test_data_cleaning }
+# removing columns having value of "N/A" or "" value that have at least 90% of the total number of rows in the test set
+tidx_2remove <- which(colSums(is.na(test_data) | test_data=='') > 0.9* dim(test_data)[1])
+# removing those columns
+test_clean <- test_data[ ,-tidx_2remove]
+# removing the first 7 columns that are irrelevant to the prediction model
+test_clean <- test_clean[,-(1:7)]
+dim(test_clean)
+str(test_clean)
+```
+
+
+From the above, the columns of "train_clean" match with the columns of "test_clean", except for the last column, "problem_id". But we do not need to care about the "problem_id" column at this time.
+
+## Build Classification models
+We use "decision tree" and "random forest" to build classification models.
+
+First, we partiion the training data into 2 parts and use cross validation method to validate the model we build.
+
+To ensure the reproductivity of this experiment, we initial the seed to 12345.
+
+```{r data_partition}
+set.seed(12345)
+dim(train_clean)
+dim(test_clean)
+tr1 <- createDataPartition(train_clean$classe, p=0.6, list=FALSE)
+training <- train_clean[tr1,]
+testing <- train_clean[-tr1,]
+```
+
+##Train with decision tree
+```{r dtree}
+mDT <- rpart(classe~., data=training, method='class')
+fancyRpartPlot(mDT)
+```
+##Confusion matrix using out-of-sample data in the decision tree model
+```{r dtree_predict}
+ctree_pred <- predict(mDT, newdata=testing, type='class')
+cm_ctree <- confusionMatrix(ctree_pred, testing$classe)
+cm_ctree
+```
+
+## Random Forest
+##Training Random forest with 100 trees.
+```{r rf_tree}
+set.seed(12345)
+mRF <- randomForest(classe ~., data=training, ntree=100)
+```
+
+##Plotting the out-of-sample error of the random forest vs. num. of trees
+```{r rf_plot}
+plot(mRF)
+```
+
+##Plotting the important variables for the classification problem.
+```{r varImp}
+varImpPlot(mRF)
+```
+
+##Confusion matrix using out-of-sample data in the random forest model
+```{r rf_predict}
+pred_rf <- predict(mRF, newdata=testing, type='class')
+cm_rf <- confusionMatrix(pred_rf, testing$classe)
+cm_rf
+```
+
+##Building the Boosting Model
+```{r boosting}
+set.seed(12345)
+mbst <- train(classe ~., method="gbm", data=training, verbose=F, trControl=trainControl(method="cv", number=10))
+mbst
+```
+
+```{r plotBoost}
+plot(mbst)
+```
+
+##Out-of-sample using confusion matrix
+```{r predict_Boost}
+pred_bt <- predict(mbst, newdata=testing)
+confusionMatrix(pred_bt, testing$classe)
+```
+
+##Classification of Uknonw test data
+# Decision Tree Model
+```{r dtree_unknown_test_data}
+pred_dT <- predict(mDT, newdata=test_clean, type= 'class')
+pred_dT
+```
+
+##Random forest model
+```{r rf_unknown_test}
+pred_rf <- predict(mRF, newdata=test_clean, type= 'class')
+pred_rf
+```
+
+##Stochastic Gradient Boosting (gbm)
+```{r rf_unknown_test_boost}
+pred_bt <- predict(mbst, newdata=test_clean)
+pred_bt
+```
+
+I beleive that Random Forest model (n=100) and Stochastic Gradient Boosting (gbm) are very accurate in terms of the out-of-sample accuracy, i.e. 99.44% for Random Forest 96.39% for gbm and 72.67% for Decision Tree model respectively.  We can reply on either Random Forest or Stochastic Gradient Boosting (gbm) for the prediction. One caution is that the time it took to build Random Forest is much faster than that for gbm. Therefore, we would decide to use Random Forest to get the perliminary prediction result as much as possible.
+
+
